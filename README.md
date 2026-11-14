@@ -3,10 +3,9 @@
 A deterministic 3D simulator and (eventually) benchmark for multi-drone
 navigation in shared airspace, built on [MuJoCo](https://mujoco.org).
 
-**Status: milestone M0.** The simulator, a quadrotor autopilot, a naive
-straight-line baseline and collision *detection* are in place.
-**Collision avoidance is not implemented yet**: drones that are sent through
-each other will collide, and the simulator reports it.
+**Status: milestone M1.** The simulator, a quadrotor autopilot and a
+distributed MPC planner with collision avoidance are in place, alongside a
+naive straight-line baseline that shows what happens without it.
 
 ## What is here
 
@@ -14,8 +13,13 @@ each other will collide, and the simulator reports it.
   collective thrust and three body torques.
 - **Geometric SE(3) autopilot** (500 Hz) that tracks velocity setpoints.
 - **Policy interface** (50 Hz): world state in, one velocity setpoint per
-  drone out. `StraightLinePolicy` flies each drone directly at its goal and
-  ignores every other drone.
+  drone out.
+- **`DMPCPolicy`**: distributed model predictive control. Each drone solves
+  its own small QP (OSQP) every 0.1 s over a 1.5 s horizon, respecting its
+  speed and acceleration limits and keeping a safety distance from the plans
+  its neighbours have announced.
+- **`StraightLinePolicy`**: flies each drone directly at its goal and ignores
+  every other drone. It performs no collision avoidance.
 - **Collision detection** from MuJoCo contacts between the drones' bounding
   spheres, plus the minimum clearance over the run.
 - **Deterministic scenarios**: `antipodal_sphere`, `parallel_lanes`, `head_on`.
@@ -33,22 +37,47 @@ uv sync                                   # creates .venv with Python 3.12
 uv run examples/five_drones.py
 ```
 
-Five drones start on a sphere and each flies to the opposite side. All paths
-cross at the centre, so the naive baseline fails:
+Five drones start on a sphere and each flies to the opposite side, so every
+straight path crosses at the centre. With DMPC all five get through:
 
 ```text
-simulated 30.00 s
+policy: dmpc, drones: 5
+simulated 5.24 s
+  drone_0: reached goal (final error 0.011 m)
+  ...
+minimum clearance between drones: +0.216 m
+collisions: none
+```
+
+The naive baseline on the same scenario collides at the centre at about
+1.67 s and stays jammed there until the time limit:
+
+```bash
+uv run examples/five_drones.py --policy straight
+```
+
+```text
   drone_0: DID NOT reach goal (final error 3.298 m)
   ...
 minimum clearance between drones: -0.019 m
 drone-drone collisions: 14 contact(s), pairs [(0, 1), (0, 2), (0, 3), (1, 3), (1, 4), (2, 4), (3, 4)]
-  t =  1.666 s  drone_1 x drone_4  lasted  0.068 s  penetration 18.2 mm
-  ...
 ```
 
-The drones collide at the centre at about 1.67 s and then stay jammed against
-each other until the time limit. Fixing this is the point of the next
-milestones.
+### Results so far
+
+Measured on one machine (Apple M1); "clearance" is the smallest gap between
+any two collision spheres over the run.
+
+| Scenario | Policy | Reached goal | Contacts | Min clearance | Time |
+| --- | --- | --- | --- | --- | --- |
+| Head-on pair | straight | 0 / 2 | 2 | -0.03 m | timeout |
+| Head-on pair | DMPC | 2 / 2 | 0 | +0.22 m | 4.56 s |
+| 5-drone swap | straight | 0 / 5 | 14 | -0.02 m | timeout |
+| 5-drone swap | DMPC | 5 / 5 | 0 | +0.22 m | 5.24 s |
+| 8-drone swap | DMPC | 8 / 8 | 0 | +0.17 m | 5.60 s |
+| 12-drone swap | DMPC | 12 / 12 | 0 | +0.06 m | 7.48 s |
+
+Try other fleet sizes with `--drones N`.
 
 ### Watching it
 
@@ -64,9 +93,10 @@ uv run examples/five_drones.py --video swap.mp4
 ## Using the library
 
 ```python
-from atlas import Simulator, StraightLinePolicy, parallel_lanes
+from atlas import DMPCPolicy, Simulator, antipodal_sphere
 
-sim = Simulator(parallel_lanes(num_robots=5), StraightLinePolicy())
+robots = antipodal_sphere(num_robots=5)
+sim = Simulator(robots, DMPCPolicy(robots))
 result = sim.run()
 
 result.all_reached_goal  # True
@@ -86,6 +116,15 @@ A policy is any callable `WorldState -> (N, 3)` array of velocity setpoints.
 - A drone's collision shape is a single sphere.
 - Collisions are resolved physically by MuJoCo (drones bounce); there is no
   damage model.
+- DMPC's separation guarantee holds for its planning model at the sampled
+  steps. The real drone tracks the plan imperfectly, which a 0.15 m safety
+  margin absorbs; this is an empirical result, not a proof for the physical
+  system.
+- DMPC is not yet tuned for dense traffic. With 12 drones through one point,
+  37 of roughly 900 solves hit the iteration limit (the drone brakes for that
+  step) and clearance drops to 6 cm, still without contact.
+- DMPC is not real-time yet: about 30 ms per drone per replan with 12 drones.
+- There are no static obstacles.
 - Determinism holds for the same machine and MuJoCo build. Results are not
   guaranteed to be bit-identical across platforms.
 
@@ -101,10 +140,10 @@ uv run mypy
 
 | Milestone | Deliverable |
 | --- | --- |
-| **M0 (this)** | 3D MuJoCo simulator, autopilot, straight-line baseline, collision detection, tests, CI |
-| M1 | Scenario suite and visualization |
-| M2 | ORCA collision-avoidance baseline (3D) |
-| M3 | MPC navigation controller |
-| M4 | Runtime safety assurance |
+| M0 (done) | 3D MuJoCo simulator, autopilot, straight-line baseline, collision detection, tests, CI |
+| **M1 (this)** | Distributed MPC planner with collision avoidance |
+| M2 | Control barrier function safety filter |
+| M3 | ORCA baseline and benchmark metrics for comparison |
+| M4 | Static obstacles and larger fleets |
 | M5 | Benchmark suite and reproducible experiments |
 | M6 | ROS 2 / Gazebo integration |
