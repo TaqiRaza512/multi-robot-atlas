@@ -4,6 +4,7 @@ from atlas.control import ControlGains, tracking_wrench
 from atlas.dmpc import DMPCConfig, DMPCPolicy
 from atlas.model import build_mjcf, build_model
 from atlas.policies import Policy, StraightLinePolicy
+from atlas.safety import SafetyFilter, SafetyFilterConfig
 from atlas.scenarios import antipodal_sphere, head_on, parallel_lanes
 from atlas.simulator import CollisionEvent, SimulationResult, Simulator
 from atlas.types import Robot, RobotConfig, SimConfig, WorldState
@@ -16,6 +17,8 @@ __all__ = [
     "Policy",
     "Robot",
     "RobotConfig",
+    "SafetyFilter",
+    "SafetyFilterConfig",
     "SimConfig",
     "SimulationResult",
     "Simulator",
