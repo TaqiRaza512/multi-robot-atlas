@@ -38,13 +38,17 @@ def render_frames(
     width: int = 960,
     height: int = 720,
     show_collision_spheres: bool = False,
+    zoom: float = 1.0,
 ) -> list[Frame]:
     """Replay ``result`` and return RGB frames at ``fps``.
+
+    ``zoom`` above 1 moves the default camera closer to the scene centre.
 
     The replay uses a private ``MjData``, so ``sim`` is left untouched.
     """
     data = mujoco.MjData(sim.model)
     camera = default_camera(sim)
+    camera.distance /= zoom
     option = mujoco.MjvOption()
     option.geomgroup[3] = int(show_collision_spheres)
 
@@ -68,7 +72,7 @@ def save_video(
     result: SimulationResult,
     path: str | Path,
     fps: int = 30,
-    **render_options: int | bool,
+    **render_options: float | bool,
 ) -> Path:
     """Render ``result`` to a video file (format chosen by the extension, e.g. ``.mp4``)."""
     try:

@@ -201,6 +201,9 @@ class Simulator:
         """Return every robot to its start, at rest, and clear all records."""
         mujoco.mj_resetData(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)
+        reset_policy = getattr(self.policy, "reset", None)
+        if callable(reset_policy):
+            reset_policy()
         self._active = {}
         self._events = []
         self._min_clearance = float("inf")

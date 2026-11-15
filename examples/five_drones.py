@@ -1,11 +1,14 @@
-"""Five drones swap sides of a sphere using naive straight-line flight.
+"""Five drones swap sides of a sphere, so every straight path crosses at the centre.
 
-The policy ignores other drones, so they collide near the centre. The
-simulator detects and reports those collisions; it does not avoid them.
+Two navigation policies can fly the scenario:
 
-    uv run examples/five_drones.py                      # print a summary
-    uv run examples/five_drones.py --video swap.mp4     # also render a video
-    uv run mjpython examples/five_drones.py --view      # live 3D viewer (macOS needs mjpython)
+* ``dmpc`` (default): distributed MPC with collision avoidance.
+* ``straight``: naive straight-line flight that ignores other drones. They collide.
+
+    uv run examples/five_drones.py                       # DMPC, print a summary
+    uv run examples/five_drones.py --policy straight     # the naive baseline
+    uv run examples/five_drones.py --video swap.mp4      # also render a video
+    uv run mjpython examples/five_drones.py --view       # live 3D viewer (macOS needs mjpython)
 """
 
 from __future__ import annotations
@@ -16,7 +19,14 @@ import time
 
 import numpy as np
 
-from atlas import SimulationResult, Simulator, StraightLinePolicy, antipodal_sphere
+from atlas import (
+    DMPCPolicy,
+    Policy,
+    SimulationResult,
+    Simulator,
+    StraightLinePolicy,
+    antipodal_sphere,
+)
 
 
 def report(sim: Simulator, result: SimulationResult) -> None:
@@ -68,11 +78,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--video", metavar="PATH", help="render the run to a video file")
     parser.add_argument("--view", action="store_true", help="watch live in the MuJoCo viewer")
+    parser.add_argument("--policy", choices=["dmpc", "straight"], default="dmpc")
+    parser.add_argument("--drones", type=int, default=5, help="number of drones (default 5)")
     args = parser.parse_args()
 
-    sim = Simulator(antipodal_sphere(num_robots=5), StraightLinePolicy())
+    robots = antipodal_sphere(num_robots=args.drones)
+    policy: Policy = DMPCPolicy(robots) if args.policy == "dmpc" else StraightLinePolicy()
+    sim = Simulator(robots, policy)
+    print(f"policy: {args.policy}, drones: {args.drones}")
     result = run_with_viewer(sim) if args.view else sim.run()
     report(sim, result)
+    if isinstance(policy, DMPCPolicy):
+        print(
+            f"planner: worst accepted safety-distance violation {policy.max_slack:.3f} m, "
+            f"{policy.solver_failures} failed solve(s)"
+        )
 
     if args.video:
         from atlas.video import save_video
